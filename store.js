@@ -97,6 +97,21 @@ const Store = (() => {
   const removeFile = (name) => call({ cmd: 'remove', name });
 
   /* Datenpaket öffnen: [4 Byte Kopflänge][Kopf-JSON][Wortpositionen] */
+  /* Microsoft Intune (App-Schutz der Firma) verschlüsselt Dateien, die eine verwaltete App wie OneDrive
+     an eine nicht verwaltete App weitergibt. Solche Dateien beginnen mit "MSMAMARPCRY". */
+  async function isProtected(f) {
+    try {
+      const b = new Uint8Array(await f.slice(0, 16).arrayBuffer());
+      return new TextDecoder('latin1').decode(b).includes('MSMAMARPCRY');
+    } catch { return false; }
+  }
+  async function checkProtected(f, what) {
+    if (await isProtected(f)) {
+      throw new Error(`${what} sind durch den Firmen-App-Schutz (Microsoft Intune) verschlüsselt und können `
+        + 'außerhalb der Firmen-Apps nicht gelesen werden. Das ist eine Sicherheitsrichtlinie der Firmen-IT – '
+        + 'bitte die Dateien auf einem anderen, erlaubten Weg auf das Gerät bringen oder die IT fragen.');
+    }
+  }
   async function describe(f, label) {        // für Fehlermeldungen: Größe und erste Bytes
     let hex = '–';
     try { hex = [...new Uint8Array(await f.slice(0, 12).arrayBuffer())].map(b => b.toString(16).padStart(2, '0')).join(' '); } catch {}
@@ -105,6 +120,7 @@ const Store = (() => {
   async function openBundle() {
     const f = await file(DATA);
     if (!f || f.size < 8) throw new Error('Suchdaten fehlen oder sind leer' + (f ? ` (${f.size} Bytes)` : ''));
+    await checkProtected(f, 'Die Suchdaten');
     const hl = new DataView(await f.slice(0, 4).arrayBuffer()).getUint32(0, true);
     if (hl < 2 || hl > f.size - 4) throw new Error('Keine gültige Datendatei. ' + await describe(f, 'Gespeichert'));
     const head = JSON.parse(await f.slice(4, 4 + hl).text());
@@ -128,5 +144,5 @@ const Store = (() => {
     return JSON.parse(await f.slice(4, 4 + hl).text());
   }
 
-  return { supported, status, readMeta, writeMeta, download, importFile, remove, removeFile, openBundle, describe, peekBundleHead, file, PDF, DATA };
+  return { supported, status, readMeta, writeMeta, download, importFile, remove, removeFile, openBundle, describe, checkProtected, peekBundleHead, file, PDF, DATA };
 })();

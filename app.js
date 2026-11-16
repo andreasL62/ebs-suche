@@ -923,6 +923,8 @@ async function importPicked(files) {
   try {
     navigator.storage.persist?.().catch(() => {});
     if (dat.size < 1e6) throw new Error(`„${dat.name}“ ist nur ${dat.size.toLocaleString('de-DE')} Bytes groß – vermutlich noch nicht aus OneDrive heruntergeladen. In der OneDrive-App „Offline verfügbar machen“ und erneut wählen.`);
+    await Store.checkProtected(dat, 'Die gewählten Dateien');
+    await Store.checkProtected(pdf, 'Die gewählten Dateien');
     releaseData();
     await Store.writeMeta({ pdfSize: pdf.size, datenSize: dat.size, source: 'datei' });
     // erst vollständig in den App-Speicher kopieren, dann prüfen (direktes Lesen aus dem Auswahldialog ist unter iOS unzuverlässig)

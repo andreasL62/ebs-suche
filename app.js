@@ -922,11 +922,15 @@ async function importPicked(files) {
   setBusy(true);
   try {
     navigator.storage.persist?.().catch(() => {});
-    const head = await Store.peekBundleHead(dat);
-    if (head.fileSize && head.fileSize !== pdf.size) throw new Error('„ebs-daten.bin“ gehört nicht zu dieser PDF (andere Dateigröße).');
+    if (dat.size < 1e6) throw new Error(`„${dat.name}“ ist nur ${dat.size.toLocaleString('de-DE')} Bytes groß – vermutlich noch nicht aus OneDrive heruntergeladen. In der OneDrive-App „Offline verfügbar machen“ und erneut wählen.`);
     releaseData();
     await Store.writeMeta({ pdfSize: pdf.size, datenSize: dat.size, source: 'datei' });
+    // erst vollständig in den App-Speicher kopieren, dann prüfen (direktes Lesen aus dem Auswahldialog ist unter iOS unzuverlässig)
     await Store.importFile(dat, Store.DATA, (p, t) => progress('Suchdaten', p, t));
+    let head;
+    try { head = (await Store.openBundle()).head; }
+    catch (e) { throw new Error(`${e.message} · ${await Store.describe(dat, 'Gewählt „' + dat.name + '“')}`); }
+    if (head.fileSize && head.fileSize !== pdf.size) throw new Error(`„ebs-daten.bin“ gehört nicht zu dieser PDF (erwartet ${head.fileSize.toLocaleString('de-DE')} Bytes, PDF hat ${pdf.size.toLocaleString('de-DE')}).`);
     await Store.importFile(pdf, Store.PDF, (p, t) => progress('Zeichnungen (PDF)', p, t));
     await finishSetup();
   } catch (e) {

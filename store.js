@@ -97,9 +97,16 @@ const Store = (() => {
   const removeFile = (name) => call({ cmd: 'remove', name });
 
   /* Datenpaket öffnen: [4 Byte Kopflänge][Kopf-JSON][Wortpositionen] */
+  async function describe(f, label) {        // für Fehlermeldungen: Größe und erste Bytes
+    let hex = '–';
+    try { hex = [...new Uint8Array(await f.slice(0, 12).arrayBuffer())].map(b => b.toString(16).padStart(2, '0')).join(' '); } catch {}
+    return `${label}: ${f.size.toLocaleString('de-DE')} Bytes, Anfang: ${hex}`;
+  }
   async function openBundle() {
     const f = await file(DATA);
+    if (!f || f.size < 8) throw new Error('Suchdaten fehlen oder sind leer' + (f ? ` (${f.size} Bytes)` : ''));
     const hl = new DataView(await f.slice(0, 4).arrayBuffer()).getUint32(0, true);
+    if (hl < 2 || hl > f.size - 4) throw new Error('Keine gültige Datendatei. ' + await describe(f, 'Gespeichert'));
     const head = JSON.parse(await f.slice(4, 4 + hl).text());
     const base = 4 + hl;
     return {
@@ -121,5 +128,5 @@ const Store = (() => {
     return JSON.parse(await f.slice(4, 4 + hl).text());
   }
 
-  return { supported, status, readMeta, writeMeta, download, importFile, remove, removeFile, openBundle, peekBundleHead, file, PDF, DATA };
+  return { supported, status, readMeta, writeMeta, download, importFile, remove, removeFile, openBundle, describe, peekBundleHead, file, PDF, DATA };
 })();

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3a5f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="EBS Suche">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>EBS Zeichnungssuche</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="searchrow">
+    <input id="q" type="search" placeholder="Suchen, z. B.  trafo 110kv feld" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Suchbegriffe">
+    <button id="tocBtn" class="iconbtn" title="Inhalt nach Hauptgruppen und Ebs-Nummern">Inhalt</button>
+    <button id="dataBtn" class="iconbtn" title="Daten auf diesem Gerät" aria-label="Daten auf diesem Gerät">Daten</button>
+  </div>
+  <details id="filters">
+    <summary id="filterSum">Filter</summary>
+    <div class="fbody">
+      <label class="frow">Hauptgruppe <select id="fHg"></select></label>
+      <div class="fhead">Verwendbar für <small>(antippen = ein-/ausblenden)</small></div>
+      <div id="fUse" class="chips"></div>
+      <div class="fhead">Gültigkeitsvermerke <small>(antippen = Blätter mit diesem Vermerk ausblenden)</small></div>
+      <div id="fValid" class="chips"></div>
+      <button id="fReset" type="button" class="linkbtn">Alle Filter zurücksetzen</button>
+    </div>
+  </details>
+  <div class="meta">
+    <span id="status">Starte …</span>
+    <label class="sortlbl" title="Findet auch Wörter mit Lesefehlern der Texterkennung (1–2 Zeichen Abweichung)"><input type="checkbox" id="fuzzy" checked> Unscharf</label>
+    <label class="sortlbl">Sortierung
+      <select id="sort"><option value="rel">Relevanz</option><option value="page">Seitenfolge</option></select>
+    </label>
+  </div>
+  <div id="banner" hidden></div>
+</header>
+
+<main id="list"></main>
+
+<section id="toc" hidden>
+  <div class="tocbar">
+    <button id="tocClose" class="iconbtn" aria-label="Schließen">←</button>
+    <span id="tocPath">Inhalt</span>
+  </div>
+  <div id="tocList"></div>
+</section>
+
+<section id="setup" hidden>
+  <div class="setupbox">
+    <h1>Daten auf diesem Gerät</h1>
+    <p id="setupIntro">Damit die Suche ohne Verbindung funktioniert, werden die Zeichnungen (PDF, ca. 650 MB) und die Suchdaten (ca. 50 MB) einmalig auf diesem Gerät gespeichert.</p>
+    <div id="iosHint" class="note" hidden>
+      <b>iPhone/iPad:</b> Bitte zuerst über <b>Teilen → „Zum Home-Bildschirm“</b> als App hinzufügen und die App <b>vom Home-Bildschirm aus</b> öffnen. Erst dort die Daten laden – sonst landen sie im Safari-Speicher und fehlen in der App.
+    </div>
+    <div id="stateBox" class="state"></div>
+    <div class="card">
+      <h2>Aus OneDrive (oder vom Gerät) laden</h2>
+      <ol class="muted steps">
+        <li>Im freigegebenen OneDrive-Ordner <b>EBS-Suche</b> liegen <code>ebs_03_2026.pdf</code> und <code>ebs-daten.bin</code>.</li>
+        <li>„Dateien wählen“ antippen → <b>OneDrive</b> (iPhone: unter „Durchsuchen“) → beide Dateien markieren → Öffnen.</li>
+        <li>Warten, bis beide kopiert sind (ca. 740 MB, Bildschirm anlassen).</li>
+      </ol>
+      <label class="filebtn primaryfile">Dateien wählen …<input id="pick" type="file" multiple></label>
+    </div>
+    <div class="card" id="pcCard" hidden>
+      <h2>Vom PC laden <small>(im WLAN)</small></h2>
+      <p class="muted">Der EBS-Server auf dem PC ist erreichbar. Ein abgebrochener Download wird fortgesetzt.</p>
+      <button id="fromPc" class="primarybtn">Daten vom PC laden</button>
+    </div>
+    <div id="prog" class="card" hidden>
+      <div id="progText">…</div>
+      <progress id="progBar" value="0" max="1"></progress>
+    </div>
+    <div class="row">
+      <button id="setupClose" class="secbtn" hidden>Zur Suche</button>
+      <button id="wipe" class="secbtn danger" hidden>Daten von diesem Gerät löschen</button>
+    </div>
+    <p id="storeInfo" class="muted small"></p>
+  </div>
+</section>
+
+<section id="viewer" hidden>
+  <div class="vbar">
+    <button id="vClose" title="Zurück zur Liste (Esc)" aria-label="Zurück">←</button>
+    <span id="vTitle"></span>
+    <button id="vBack" class="backbtn" hidden title="Zurück zum vorherigen Blatt (Rücktaste)"></button>
+    <div class="vtools">
+      <button id="vPrevHit" title="Vorheriges Suchergebnis (Bild ↑)">‹ Treffer</button>
+      <button id="vNextHit" title="Nächstes Suchergebnis (Bild ↓)">Treffer ›</button>
+      <button id="vPrevPage" title="Vorherige Seite (←)" aria-label="Vorherige Seite">◂</button>
+      <button id="vNextPage" title="Nächste Seite (→)" aria-label="Nächste Seite">▸</button>
+      <button id="vZoomOut" title="Verkleinern (−)" aria-label="Verkleinern">−</button>
+      <button id="vFit" title="Ganze Seite (0)">Ganz</button>
+      <button id="vZoomIn" title="Vergrößern (+)" aria-label="Vergrößern">+</button>
+      <button id="vSpot" class="primary" title="Zur nächsten Fundstelle zoomen (Enter)">Fundstelle</button>
+    </div>
+  </div>
+  <div id="scroller">
+    <div id="sheet">
+      <canvas id="bg" class="bg"></canvas>
+      <canvas id="hi" class="hi"></canvas>
+      <div id="hl"></div>
+      <div id="rl"></div>
+    </div>
+    <div id="vmsg"></div>
+  </div>
+</section>
+
+<script src="lib/pdf.min.js"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

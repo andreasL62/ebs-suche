@@ -17,7 +17,10 @@
 <body>
 <header class="bar">
   <div class="searchrow">
-    <input id="q" type="search" placeholder="Suchen, z. B.  trafo 110kv feld" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Suchbegriffe">
+    <div class="qwrap">
+      <input id="q" type="search" placeholder="Suchen, z. B.  trafo 110kv feld" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Suchbegriffe">
+      <button id="qClear" type="button" hidden title="Suchfeld leeren" aria-label="Suchfeld leeren">✕</button>
+    </div>
     <button id="tocBtn" class="iconbtn" title="Inhalt nach Hauptgruppen und Ebs-Nummern">Inhalt</button>
     <button id="dataBtn" class="iconbtn" title="Daten auf diesem Gerät" aria-label="Daten auf diesem Gerät">Daten</button>
   </div>
@@ -25,6 +28,7 @@
     <summary id="filterSum">Filter</summary>
     <div class="fbody">
       <label class="frow">Hauptgruppe <select id="fHg"></select></label>
+      <label class="frow">Nebengruppe <select id="fNg"></select></label>
       <div class="fhead">Verwendbar für <small>(antippen = ein-/ausblenden)</small></div>
       <div id="fUse" class="chips"></div>
       <div class="fhead">Gültigkeitsvermerke <small>(antippen = Blätter mit diesem Vermerk ausblenden)</small></div>
@@ -64,7 +68,8 @@
       <h2>Dateien vom Gerät laden</h2>
       <ol class="muted steps">
         <li>Den Freigabe-Link zum Ordner <b>EBS-Suche</b> in Safari/Chrome öffnen und <code>ebs_03_2026.pdf</code> und <code>ebs-daten.bin</code> <b>herunterladen</b> (nicht über die Firmen-OneDrive-App – deren App-Schutz verschlüsselt die Dateien).</li>
-        <li>„Dateien wählen“ antippen → iPhone: „Durchsuchen“ → „Auf meinem iPhone“ → <b>Downloads</b> → beide Dateien markieren → Öffnen.</li>
+        <li>„Dateien wählen“ antippen → iPhone: „Durchsuchen“ → „Auf meinem iPhone“ → <b>Downloads</b> → beide Dateien markieren → Öffnen.
+          Statt <code>ebs_03_2026.pdf</code> geht auch die offizielle, passwortgeschützte <code>EbsPDF_03_2026.pdf</code> – das Passwort wird dann einmal abgefragt.</li>
         <li>Warten, bis beide kopiert sind (ca. 740 MB, Bildschirm anlassen). Danach können die Downloads gelöscht werden.</li>
       </ol>
       <label class="filebtn primaryfile">Dateien wählen …<input id="pick" type="file" multiple></label>
@@ -73,6 +78,13 @@
       <h2>Vom PC laden <small>(im WLAN)</small></h2>
       <p class="muted">Der EBS-Server auf dem PC ist erreichbar. Ein abgebrochener Download wird fortgesetzt.</p>
       <button id="fromPc" class="primarybtn">Daten vom PC laden</button>
+    </div>
+    <div id="pwBox" class="card" hidden>
+      <h2>Passwort der PDF</h2>
+      <p id="pwMsg" class="muted"></p>
+      <input id="pwIn" type="password" autocomplete="off" aria-label="Passwort der PDF">
+      <p class="muted small">Das Passwort wird nur auf diesem Gerät gespeichert, damit die App die PDF offline öffnen kann.</p>
+      <div class="row"><button id="pwOk" type="button" class="primarybtn">Öffnen</button><button id="pwCancel" type="button" class="secbtn">Abbrechen</button></div>
     </div>
     <div id="prog" class="card" hidden>
       <div id="progText">…</div>
@@ -100,6 +112,7 @@
       <button id="vFit" title="Ganze Seite (0)">Ganz</button>
       <button id="vZoomIn" title="Vergrößern (+)" aria-label="Vergrößern">+</button>
       <button id="vSpot" class="primary" title="Zur nächsten Fundstelle zoomen (Enter)">Fundstelle</button>
+      <button id="vGoto" class="primary" title="Blatt nach Ebs-Nummer öffnen (#)">Ebs-Nr.</button>
     </div>
   </div>
   <div id="scroller">
@@ -112,6 +125,23 @@
     <div id="vmsg"></div>
   </div>
 </section>
+
+<div id="gotoWin" hidden role="dialog" aria-label="Blatt nach Ebs-Nummer öffnen">
+  <div id="gotoHead" title="Zum Verschieben ziehen">
+    <span class="grip">⠿</span> Gehe zu Ebs-Nr.
+    <button id="gotoClose" type="button" aria-label="Schließen">✕</button>
+  </div>
+  <input id="gotoInput" type="text" inputmode="numeric" autocomplete="off" placeholder="__.__.__" aria-label="Ebs-Nummer">
+  <div id="gotoHits"></div>
+  <div id="gotoMsg"></div>
+  <div class="pad">
+    <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button>
+    <button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button>
+    <button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button>
+    <button type="button" data-k="back" aria-label="Ziffer löschen">⌫</button><button type="button" data-k="0">0</button>
+    <button type="button" data-k="ok" class="ok">OK</button>
+  </div>
+</div>
 
 <script src="lib/pdf.min.js"></script>
 <script src="store.js"></script>

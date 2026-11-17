@@ -45,7 +45,8 @@ async function loadData(bundle) {
   el.status.textContent = 'Lade Suchdaten …';
   const b = bundle || await Store.openBundle();
   const pdfFile = await Store.file(Store.PDF);
-  S.bundle = b; S.pdfFile = pdfFile; S.pdfP = null; S.warnHtml = '';
+  const meta = await Store.readMeta() || {};
+  S.bundle = b; S.pdfFile = pdfFile; S.pdfP = null; S.warnHtml = ''; S.pdfPw = meta.pdfPw || '';
   thumbCache.clear();
   const idx = b.head;
   S.numPages = idx.numPages;
@@ -68,7 +69,7 @@ async function loadData(bundle) {
   buildFilterUI();
   const noText = S.pages.filter(p => !p.s).length;
   S.statusBase = `${S.numPages} Seiten durchsuchbar` + (noText ? ` · ${noText} ohne Text` : '') + (idx.partial ? ' · TEST-Index (unvollständig)' : '');
-  if (idx.fileSize && pdfFile && pdfFile.size !== idx.fileSize) {
+  if (idx.fileSize && pdfFile && pdfFile.size !== idx.fileSize && !meta.official) {
     S.warnHtml = ' · <span class="warn">Suchdaten passen nicht zur PDF – bitte Daten neu laden</span>';
   }
   el.status.innerHTML = esc(S.statusBase) + S.warnHtml;
@@ -236,29 +237,31 @@ function badges(p) {
 }
 
 /* ---------- Filter: Hauptgruppe, Bauarten ("Verwendbar für"), Gültigkeitsvermerke ---------- */
-const F = { hg: '', offUse: new Set(), offValid: new Set(), noUse: true };
+const F = { hg: '', ng: '', offUse: new Set(), offValid: new Set(), noUse: true };
 try {
   const f = JSON.parse(localStorage.getItem('ebs.filter') || '{}');
-  F.hg = f.hg || ''; F.offUse = new Set(f.offUse || []); F.offValid = new Set(f.offValid || []); F.noUse = f.noUse !== false;
+  F.hg = f.hg || ''; F.ng = f.ng || ''; F.offUse = new Set(f.offUse || []); F.offValid = new Set(f.offValid || []); F.noUse = f.noUse !== false;
 } catch {}
 function saveFilter() {
-  try { localStorage.setItem('ebs.filter', JSON.stringify({ hg: F.hg, offUse: [...F.offUse], offValid: [...F.offValid], noUse: F.noUse })); } catch {}
+  try { localStorage.setItem('ebs.filter', JSON.stringify({ hg: F.hg, ng: F.ng, offUse: [...F.offUse], offValid: [...F.offValid], noUse: F.noUse })); } catch {}
 }
 function passesFilter(p) {
   if (F.hg && !p.nr.startsWith(F.hg + '.')) return false;
+  if (F.ng && !p.nr.startsWith(F.ng + '.')) return false;
   if (p.valid.some(k => F.offValid.has(k))) return false;
   if (p.use.length) { if (p.use.every(u => F.offUse.has(u))) return false; }
   else if (!F.noUse) return false;
   return true;
 }
 function activeFilters() {
-  return (F.hg ? 1 : 0) + F.offUse.size + F.offValid.size + (F.noUse ? 0 : 1);
+  return (F.hg ? 1 : 0) + (F.ng ? 1 : 0) + F.offUse.size + F.offValid.size + (F.noUse ? 0 : 1);
 }
 function buildFilterUI() {
   const sel = $('fHg');
   sel.innerHTML = '<option value="">Alle Hauptgruppen</option>' + Object.keys(S.hg).sort()
     .map(k => `<option value="${k}">${k} – ${esc(S.hg[k])}</option>`).join('');
   sel.value = F.hg;
+  fillNg();
   const chip = (label, count, off, onToggle) => {
     const b = document.createElement('button'); b.type = 'button';
     b.className = 'chip' + (off ? ' off' : '');
@@ -285,8 +288,23 @@ function updateFilterCount() {
   $('filterSum').classList.toggle('active', !!n);
 }
 function filterChanged() { saveFilter(); updateFilterCount(); run(); }
-$('fHg').onchange = e => { F.hg = e.target.value; filterChanged(); };
-$('fReset').onclick = () => { F.hg = ''; F.offUse.clear(); F.offValid.clear(); F.noUse = true; saveFilter(); buildFilterUI(); run(); };
+$('fHg').onchange = e => { F.hg = e.target.value; F.ng = ''; fillNg(); filterChanged(); };
+$('fNg').onchange = e => { F.ng = e.target.value; filterChanged(); };
+function fillNg() {                       // Nebengruppen (xx.yy) der gewählten Hauptgruppe, mit Titel des ersten Blatts
+  const sel = $('fNg');
+  if (!F.hg) { sel.innerHTML = '<option value="">– erst Hauptgruppe wählen –</option>'; sel.disabled = true; return; }
+  const groups = new Map();
+  for (const s of sheets()) if (s.nr.startsWith(F.hg + '.')) {
+    const k = s.nr.slice(0, 5);
+    if (!groups.has(k)) groups.set(k, s.p.ti || '');
+  }
+  sel.disabled = false;
+  sel.innerHTML = '<option value="">Alle Nebengruppen</option>' + [...groups.entries()]
+    .map(([k, t]) => `<option value="${k}">${k}${t ? ' – ' + esc(t.slice(0, 50)) : ''}</option>`).join('');
+  if (F.ng && !groups.has(F.ng)) F.ng = '';
+  sel.value = F.ng;
+}
+$('fReset').onclick = () => { F.hg = ''; F.ng = ''; F.offUse.clear(); F.offValid.clear(); F.noUse = true; saveFilter(); buildFilterUI(); run(); };
 function snippet(t, terms) {
   const { out, map } = normMap(t);
   const ranges = [], firsts = [];
@@ -344,7 +362,7 @@ function helpEl() {
     <li><b>Ebs-Nummer</b> eingeben, z. B. <code>05.71.32</code> oder nur den Anfang <code>52.1</code>: das Blatt selbst steht oben, darunter Blätter, die darauf verweisen. Kombinierbar: <code>05.71 bogen</code>.</li>
     <li><b>Inhalt</b>: Blätter nach Hauptgruppe → Gruppe → Blatt durchblättern.</li>
     <li><b>Filter</b>: Bauarten („Verwendbar für“, z. B. Re 200, S-Bahn) und Gültigkeitsvermerke („Für Neubau ungültig“ …) ein- oder ausblenden.</li>
-    <li>In der Zeichnung: <b>Fundstelle</b> zoomt nacheinander auf jede Markierung. <b>Blau umrahmte Ebs-Nummern</b> antippen öffnet das Blatt, „← zurück zu …“ führt zurück. Zoomen mit Mausrad, Doppelklick oder zwei Fingern.</li>
+    <li>In der Zeichnung: <b>Fundstelle</b> zoomt nacheinander auf jede Markierung. <b>Ebs-Nr.</b> öffnet ein verschiebbares Fenster mit Ziffernblock: Nummer eintippen (Punkte kommen automatisch), das Blatt öffnet sich (immer Blatt 1), „← zurück zu …“ führt zurück. Zoomen mit Mausrad, Doppelklick oder zwei Fingern.</li>
   </ul>`;
   return d;
 }
@@ -361,7 +379,7 @@ function getPdf() {
   if (!S.pdfP) {
     if (!S.pdfFile) return Promise.reject(new Error('Keine PDF auf diesem Gerät'));
     S.pdfP = pdfjsLib.getDocument({
-      range: new BlobRangeTransport(S.pdfFile), disableAutoFetch: true, disableStream: true, rangeChunkSize: 1 << 19,
+      range: new BlobRangeTransport(S.pdfFile), password: S.pdfPw || undefined, disableAutoFetch: true, disableStream: true, rangeChunkSize: 1 << 19,
     }).promise;
     S.pdfP.catch(() => { S.pdfP = null; });
   }
@@ -390,21 +408,136 @@ let pageSeq = 0, bgTask = null, hiTask = null, hiTimer = 0;
 
 function openViewer(i) { S.hitPos = i; S.nav = []; showPage(S.results[i].p.n); }
 
-/* ---------- Verweise: Ebs-Nummern in der Zeichnung antippen, mit Zurück ---------- */
+/* ---------- Verweise: Ebs-Nummer eingeben, Blatt öffnen, mit Zurück ---------- */
 S.nav = [];
-function findSheet(nr, bl) {
+function findSheet(nr) {                 // bei mehreren Blättern immer Blatt 1 (sonst das erste Blatt in der PDF)
   const pages = S.byNr.get(nr);
   if (!pages) return null;
   const direct = pages.filter(p => !p.inh);
-  return (bl && (direct.find(p => p.bl === bl) || pages.find(p => p.bl === bl))) || direct[0] || pages[0];
+  const bl1 = direct.find(p => p.bl === 1);
+  if (bl1) return bl1;
+  // Blatt 1 nicht erkannt: Anfang der längsten zusammenhängenden Seitenfolge dieser Nummer
+  // (einzelne Seiten mit falsch gelesener Nummer liegen meist allein)
+  let best = null, cur = null;
+  for (const p of pages) {
+    if (cur && p.n === cur.last + 1) { cur.last = p.n; cur.len++; } else { cur = { first: p, last: p.n, len: 1 }; }
+    if (!best || cur.len > best.len) best = cur;
+  }
+  return best ? best.first : (direct[0] || pages[0]);
 }
-function followRef(nr, bl) {
-  const t = findSheet(nr, bl);
-  if (!t) { flash(`Ebs ${nr} ist in dieser PDF nicht enthalten.`); return; }
-  S.nav.push({ page: S.cur, hitPos: S.hitPos });
-  S.hitPos = -1;
-  showPage(t.n);
+function followRef(nr) {
+  const t = findSheet(nr);
+  if (!t) return false;
+  if (t.n !== S.cur) {
+    S.nav.push({ page: S.cur, hitPos: S.hitPos });
+    S.hitPos = -1;
+    showPage(t.n);
+  }
+  return true;
 }
+
+/* Fenster „Gehe zu Ebs-Nr.“: verschiebbar, eigener Ziffernblock, Punkte nach je 2 Ziffern */
+const G = { digits: '' };
+const touchDevice = matchMedia('(pointer: coarse)').matches;
+function gotoFmt(d) {
+  return d.replace(/^(\d{2})(\d{0,2})(\d{0,2}).*$/, (m, a, b, c) => a + '.' + (b ? b + (b.length === 2 ? '.' + c : '') : ''))
+    .replace(/^(\d)$/, '$1');
+}
+function openGoto() {
+  if (!S.pages.length) return;
+  G.digits = '';
+  const w = $('gotoWin');
+  w.hidden = false;
+  try {
+    const pos = JSON.parse(localStorage.getItem('ebs.gotoPos') || 'null');
+    if (pos) { w.style.left = pos.x + 'px'; w.style.top = pos.y + 'px'; w.style.right = 'auto'; w.style.bottom = 'auto'; }
+  } catch {}
+  keepInView(w);
+  gotoRender();
+  if (!touchDevice) $('gotoInput').focus();
+}
+function closeGoto() { $('gotoWin').hidden = true; }
+function gotoRender() {
+  const d = G.digits;
+  $('gotoInput').value = d ? gotoFmt(d) : '';
+  const box = $('gotoHits'); box.textContent = ''; $('gotoMsg').textContent = '';
+  if (d.length < 2) { $('gotoMsg').textContent = 'Ziffern eingeben – die Punkte kommen automatisch.'; keepInView($('gotoWin')); return; }
+  const prefix = gotoFmt(d).replace(/\.$/, '');
+  const hits = sheets().filter(s => s.nr.startsWith(prefix));
+  if (!hits.length) { $('gotoMsg').textContent = `Keine Ebs ${prefix}… in dieser PDF.`; return; }
+  for (const s of hits.slice(0, 6)) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'gotohit';
+    b.innerHTML = `<b>Ebs ${s.nr}</b> <span>${esc(s.p.ti || '')}</span>`;
+    b.onclick = () => gotoOpen(s.nr);
+    box.append(b);
+  }
+  if (hits.length > 6) $('gotoMsg').textContent = `… und ${hits.length - 6} weitere – weitere Ziffern eingeben.`;
+  keepInView($('gotoWin'));
+}
+function gotoOpen(nr) {
+  if (!followRef(nr)) { $('gotoMsg').textContent = `Ebs ${nr} ist in dieser PDF nicht enthalten.`; return; }
+  closeGoto();
+}
+function gotoKey(k) {
+  if (/^\d$/.test(k)) { if (G.digits.length < 6) G.digits += k; }
+  else if (k === 'back') G.digits = G.digits.slice(0, -1);
+  else if (k === 'clear') G.digits = '';
+  else if (k === 'ok') {
+    if (G.digits.length === 6) return gotoOpen(gotoFmt(G.digits));
+    const first = $('gotoHits').querySelector('.gotohit');
+    if (first && $('gotoHits').children.length === 1) return first.click();
+    $('gotoMsg').textContent = 'Bitte alle 6 Ziffern eingeben oder ein Blatt antippen.';
+    return;
+  }
+  gotoRender();
+  if (G.digits.length === 6 && S.byNr.has(gotoFmt(G.digits))) gotoOpen(gotoFmt(G.digits));
+}
+function keepInView(w) {
+  const r = w.getBoundingClientRect(), m = 6;
+  const x = Math.min(Math.max(m, r.left), innerWidth - r.width - m);
+  const y = Math.min(Math.max(m, r.top), innerHeight - r.height - m);
+  w.style.left = x + 'px'; w.style.top = y + 'px'; w.style.right = 'auto'; w.style.bottom = 'auto';
+}
+(() => {
+  const w = $('gotoWin'), h = $('gotoHead');
+  let d = null;
+  h.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    const r = w.getBoundingClientRect();
+    d = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    h.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  h.addEventListener('pointermove', e => {
+    if (!d) return;
+    w.style.left = e.clientX - d.dx + 'px'; w.style.top = e.clientY - d.dy + 'px';
+    w.style.right = 'auto'; w.style.bottom = 'auto';
+  });
+  const end = () => {
+    if (!d) return; d = null; keepInView(w);
+    try { localStorage.setItem('ebs.gotoPos', JSON.stringify({ x: parseInt(w.style.left), y: parseInt(w.style.top) })); } catch {}
+  };
+  h.addEventListener('pointerup', end); h.addEventListener('pointercancel', end);
+  w.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', () => gotoKey(b.dataset.k)));
+  $('gotoClose').onclick = closeGoto;
+  const inp = $('gotoInput');
+  if (touchDevice) { inp.readOnly = true; inp.inputMode = 'none'; }
+  inp.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (/^\d$/.test(e.key)) gotoKey(e.key);
+    else if (e.key === 'Backspace') gotoKey('back');
+    else if (e.key === 'Delete') gotoKey('clear');
+    else if (e.key === 'Enter') gotoKey('ok');
+    else if (e.key === 'Escape') closeGoto();
+    else if (e.key === 'Tab') return;
+    e.preventDefault();
+  });
+  inp.addEventListener('paste', e => {      // eingefügte Nummer übernehmen, z. B. "05.71.32"
+    e.preventDefault();
+    G.digits = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
+    gotoRender();
+  });
+  addEventListener('resize', () => { if (!w.hidden) keepInView(w); });
+})();
 function navBack() {
   const s = S.nav.pop();
   if (!s) return false;
@@ -412,19 +545,7 @@ function navBack() {
   showPage(s.page);
   return true;
 }
-function drawRefs() {
-  const p = S.pages[S.cur - 1];
-  el.rl.textContent = '';
-  for (const r of (p && p.refs) || []) {
-    const ok = S.byNr.has(r[0]);
-    const a = document.createElement('button'); a.type = 'button';
-    a.className = 'ref' + (ok ? '' : ' missing');
-    a.title = `Ebs ${r[0]}${r[1] ? ' Bl.' + r[1] : ''} ${ok ? 'öffnen' : '– nicht in der PDF'}`;
-    a.setAttribute('aria-label', a.title);
-    a.onclick = e => { e.stopPropagation(); followRef(r[0], r[1]); };
-    el.rl.append(a);
-  }
-}
+function drawRefs() { el.rl.textContent = ''; }   // antippbare Rahmen abgeschaltet (OCR-Positionen zu ungenau)
 let flashT = 0;
 function flash(text) { msg(text); clearTimeout(flashT); flashT = setTimeout(() => msg(''), 2500); }
 
@@ -443,7 +564,7 @@ function closeViewer() {
   pageSeq++;
   bgTask?.cancel(); hiTask?.cancel();
   el.viewer.hidden = true; document.body.classList.remove('viewing');
-  S.nav = [];
+  S.nav = []; closeGoto();
   if (S.fromToc) { S.fromToc = false; run(); $('toc').hidden = false; document.body.classList.add('viewing'); }
 }
 function updateTitle() {
@@ -682,6 +803,7 @@ $('vZoomOut').onclick = () => zoomAt(S.scale / 1.5);
 $('vFit').onclick = fitPage;
 $('vSpot').onclick = () => spot(1);
 $('vBack').onclick = navBack;
+$('vGoto').onclick = () => ($('gotoWin').hidden ? openGoto() : closeGoto());
 window.addEventListener('popstate', () => {
   if (!el.viewer.hidden) closeViewer();
   else if (!$('toc').hidden) closeToc();
@@ -758,6 +880,11 @@ $('tocClose').onclick = () => {
 };
 
 document.addEventListener('keydown', e => {
+  if (!$('gotoWin').hidden) {                       // Nummernfenster offen: Tasten gehen dorthin
+    const map = { Backspace: 'back', Delete: 'clear', Enter: 'ok' };
+    if (/^\d$/.test(e.key) || map[e.key]) { e.preventDefault(); gotoKey(map[e.key] || e.key); return; }
+    if (e.key === 'Escape') { e.preventDefault(); closeGoto(); return; }
+  }
   if (el.viewer.hidden) {
     if (e.key === 'Escape' && !$('toc').hidden) $('tocClose').click();
     else if (e.key === '/' && document.activeElement !== el.q) { e.preventDefault(); el.q.focus(); }
@@ -766,6 +893,7 @@ document.addEventListener('keydown', e => {
   const k = e.key;
   if (k === 'Escape') { if (!navBack()) $('vClose').click(); }
   else if (k === 'Backspace') { e.preventDefault(); navBack(); }
+  else if (k === '#' || k === 'g') { e.preventDefault(); openGoto(); }
   else if (k === 'ArrowLeft' && !e.altKey) gotoPage(-1);
   else if (k === 'ArrowRight' && !e.altKey) gotoPage(1);
   else if (k === 'PageUp') { e.preventDefault(); gotoHit(-1); }
@@ -932,14 +1060,56 @@ async function importPicked(files) {
     let head;
     try { head = (await Store.openBundle()).head; }
     catch (e) { throw new Error(`${e.message} · ${await Store.describe(dat, 'Gewählt „' + dat.name + '“')}`); }
-    if (head.fileSize && head.fileSize !== pdf.size) throw new Error(`„ebs-daten.bin“ gehört nicht zu dieser PDF (erwartet ${head.fileSize.toLocaleString('de-DE')} Bytes, PDF hat ${pdf.size.toLocaleString('de-DE')}).`);
     await Store.importFile(pdf, Store.PDF, (p, t) => progress('Zeichnungen (PDF)', p, t));
+    // Die offizielle Fassung (z. B. EbsPDF_03_2026.pdf) ist anders groß und ggf. passwortgeschützt –
+    // geprüft wird deshalb, ob sie sich öffnen lässt und gleich viele Seiten hat wie die Suchdaten.
+    $('progText').textContent = 'Prüfe PDF …';
+    let pw;
+    try { pw = await verifyPdf(await Store.file(Store.PDF), head); }
+    catch (e) { await Store.removeFile(Store.PDF); throw e; }
+    const m = await Store.readMeta();
+    await Store.writeMeta({ ...m, pdfPw: pw, official: !!(head.fileSize && head.fileSize !== pdf.size) });
     await finishSetup();
   } catch (e) {
     await refreshState('Fehler: ' + (e.message || e));
   } finally {
     setBusy(false); $('pick').value = '';
   }
+}
+/* PDF zur Probe öffnen; bei Passwortschutz nachfragen. Gibt das Passwort zurück ('' ohne Schutz). */
+async function verifyPdf(file, head) {
+  let pw = '';
+  for (let attempt = 0; ; attempt++) {
+    const task = pdfjsLib.getDocument({ range: new BlobRangeTransport(file), password: pw || undefined,
+      disableAutoFetch: true, disableStream: true, rangeChunkSize: 1 << 19 });
+    try {
+      const doc = await task.promise;
+      const n = doc.numPages;
+      await doc.destroy();
+      if (head.numPages && n !== head.numPages) {
+        throw new Error(`Die PDF hat ${n} Seiten, die Suchdaten gehören zu einer Fassung mit ${head.numPages} Seiten.`);
+      }
+      return pw;
+    } catch (e) {
+      task.destroy?.();
+      if (e && e.name === 'PasswordException') {
+        pw = await askPassword(attempt === 0 ? 'Diese PDF ist mit einem Passwort geschützt.' : 'Das Passwort stimmt nicht – bitte erneut eingeben.');
+        if (pw === null) throw new Error('Ohne Passwort lässt sich die PDF nicht öffnen.');
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+function askPassword(text) {
+  return new Promise(resolve => {
+    const box = $('pwBox'), inp = $('pwIn');
+    $('pwMsg').textContent = text; inp.value = ''; box.hidden = false; inp.focus();
+    const done = v => { box.hidden = true; $('pwOk').onclick = $('pwCancel').onclick = inp.onkeydown = null; resolve(v); };
+    $('pwOk').onclick = () => done(inp.value);
+    $('pwCancel').onclick = () => done(null);
+    inp.onkeydown = e => { if (e.key === 'Enter') done(inp.value); if (e.key === 'Escape') done(null); };
+  });
 }
 async function wipe() {
   if (busy || !confirm('PDF und Suchdaten von diesem Gerät löschen? Danach müssen sie neu geladen werden.')) return;
@@ -980,11 +1150,14 @@ $('wipe').onclick = wipe;
 
 /* ---------- Start ---------- */
 let qT = 0;
-el.q.addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(run, 160); });
+const syncClear = () => { $('qClear').hidden = !el.q.value; };
+el.q.addEventListener('input', () => { syncClear(); clearTimeout(qT); qT = setTimeout(run, 160); });
+$('qClear').onclick = () => { el.q.value = ''; syncClear(); run(); el.q.focus(); };
 el.q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(qT); run(); el.q.blur(); } });
 el.sort.addEventListener('change', run);
 $('fuzzy').addEventListener('change', () => { try { localStorage.setItem('ebs.fuzzy', $('fuzzy').checked ? '1' : '0'); } catch {} run(); });
 try { el.q.value = localStorage.getItem('ebs.q') || ''; if (localStorage.getItem('ebs.fuzzy') === '0') $('fuzzy').checked = false; } catch {}
+syncClear();
 boot();
 
 if ('serviceWorker' in navigator && window.isSecureContext) {

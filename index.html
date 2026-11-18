@@ -24,11 +24,15 @@
     <button id="tocBtn" class="iconbtn" title="Inhalt nach Hauptgruppen und Ebs-Nummern">Inhalt</button>
     <button id="dataBtn" class="iconbtn" title="Daten auf diesem Gerät" aria-label="Daten auf diesem Gerät">Daten</button>
   </div>
+  <div class="searchrow numrow">
+    <div class="qwrap">
+      <input id="nq" type="text" inputmode="numeric" placeholder="Ebs-Nummer oder Gruppe" autocomplete="off" spellcheck="false" aria-label="Ebs-Nummer oder Gruppe">
+      <button id="nqClear" type="button" hidden title="Nummer löschen" aria-label="Nummer löschen">✕</button>
+    </div>
+  </div>
   <details id="filters">
     <summary id="filterSum">Filter</summary>
     <div class="fbody">
-      <label class="frow">Hauptgruppe <select id="fHg"></select></label>
-      <label class="frow">Nebengruppe <select id="fNg"></select></label>
       <div class="fhead">Verwendbar für <small>(antippen = ein-/ausblenden)</small></div>
       <div id="fUse" class="chips"></div>
       <div class="fhead">Gültigkeitsvermerke <small>(antippen = Blätter mit diesem Vermerk ausblenden)</small></div>
@@ -46,6 +50,7 @@
   <div id="banner" hidden></div>
 </header>
 
+<section id="guide" hidden></section>
 <main id="list"></main>
 
 <section id="toc" hidden>
@@ -69,7 +74,7 @@
       <ol class="muted steps">
         <li>Den Freigabe-Link zum Ordner <b>EBS-Suche</b> in Safari/Chrome öffnen und <code>ebs_03_2026.pdf</code> und <code>ebs-daten.bin</code> <b>herunterladen</b> (nicht über die Firmen-OneDrive-App – deren App-Schutz verschlüsselt die Dateien).</li>
         <li>„Dateien wählen“ antippen → iPhone: „Durchsuchen“ → „Auf meinem iPhone“ → <b>Downloads</b> → beide Dateien markieren → Öffnen.
-          Statt <code>ebs_03_2026.pdf</code> geht auch die offizielle, passwortgeschützte <code>EbsPDF_03_2026.pdf</code> – das Passwort wird dann einmal abgefragt.</li>
+          Gibt es nur neue Suchdaten, genügt <code>ebs-daten.bin</code> allein – die PDF bleibt. Statt <code>ebs_03_2026.pdf</code> geht auch die offizielle, passwortgeschützte <code>EbsPDF_03_2026.pdf</code> – das Passwort wird dann einmal abgefragt.</li>
         <li>Warten, bis beide kopiert sind (ca. 740 MB, Bildschirm anlassen). Danach können die Downloads gelöscht werden.</li>
       </ol>
       <label class="filebtn primaryfile">Dateien wählen …<input id="pick" type="file" multiple></label>
@@ -128,18 +133,18 @@
 
 <div id="gotoWin" hidden role="dialog" aria-label="Blatt nach Ebs-Nummer öffnen">
   <div id="gotoHead" title="Zum Verschieben ziehen">
-    <span class="grip">⠿</span> Gehe zu Ebs-Nr.
+    <span class="grip">⠿</span> <span id="gotoTitle">Nummer</span>
     <button id="gotoClose" type="button" aria-label="Schließen">✕</button>
   </div>
   <input id="gotoInput" type="text" inputmode="numeric" autocomplete="off" placeholder="__.__.__" aria-label="Ebs-Nummer">
-  <div id="gotoHits"></div>
   <div id="gotoMsg"></div>
   <div class="pad">
     <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button>
     <button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button>
     <button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button>
-    <button type="button" data-k="back" aria-label="Ziffer löschen">⌫</button><button type="button" data-k="0">0</button>
-    <button type="button" data-k="ok" class="ok">OK</button>
+    <button type="button" data-k="clear" aria-label="Nummer löschen">C</button><button type="button" data-k="0">0</button>
+    <button type="button" data-k="back" aria-label="Ziffer löschen">⌫</button>
+    <button type="button" data-k="ok" class="ok">Fertig</button>
   </div>
 </div>
 

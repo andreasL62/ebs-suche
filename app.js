@@ -158,8 +158,10 @@ function search(q) {
   const { inc, exc } = parse(q);
   inc.forEach(prepFuzzy);
   S.inc = inc;
-  if (!inc.length) return null;
-  const out = [];
+  S.pool = null;
+  const pre = nrPrefix();
+  if (!inc.length && !pre) return null;
+  const out = [], pool = [];
   S.hidden = 0;
   outer: for (const p of S.pages) {
     let score = 0;
@@ -175,10 +177,13 @@ function search(q) {
       else continue outer;
     }
     for (const t of exc) if (p.c.includes(t.c) || (t.num && p.nr.startsWith(t.num))) continue outer;
-    if (!passesFilter(p)) { S.hidden++; continue; }
-    out.push({ p, score });
+    const inNr = !pre || p.nr.startsWith(pre);
+    if (!passesFilter(p)) { if (inNr) S.hidden++; continue; }
+    pool.push(p);                                          // für die Ziffernauswahl: alle Seiten zum Suchtext
+    if (inNr) out.push({ p, score });
   }
-  if (el.sort.value === 'rel') out.sort((a, b) => b.score - a.score || a.p.n - b.p.n);
+  S.pool = pool;
+  if (el.sort.value === 'rel' && inc.length) out.sort((a, b) => b.score - a.score || a.p.n - b.p.n);
   return out;
 }
 
@@ -189,17 +194,102 @@ function run() {
   const r = search(q);
   el.list.textContent = ''; S.shown = 0;
   tq.length = 0;
+  renderGuide();
   if (r === null) { S.results = []; el.status.innerHTML = esc(S.statusBase || '') + (S.warnHtml || ''); el.list.append(helpEl()); return; }
   S.results = r;
   const hid = S.hidden ? ` · ${S.hidden} durch Filter ausgeblendet` : '';
-  el.status.textContent = (r.length ? `${r.length} ${r.length === 1 ? 'Seite' : 'Seiten'} gefunden` : 'Keine Treffer') + hid;
+  const pre = nrPrefix();
+  el.status.textContent = (r.length ? `${r.length} ${r.length === 1 ? 'Seite' : 'Seiten'}` + (pre ? ` mit Ebs ${pre}…` : ' gefunden') : 'Keine Treffer') + hid;
   if (!r.length) {
     const d = document.createElement('div'); d.className = 'empty';
     d.textContent = S.hidden ? 'Alle Treffer sind durch die Filter ausgeblendet – Filter prüfen.'
+      : pre && S.inc.length ? `Keine Seite mit Ebs ${pre}… enthält alle Begriffe.`
+      : pre ? `Keine Blätter mit Ebs ${pre}… in dieser PDF.`
       : 'Keine Seite enthält alle Begriffe. Weniger oder kürzere Begriffe probieren.';
     el.list.append(d); return;
   }
   showMore();
+}
+
+/* ---------- Ebs-Nummernsuche: Ziffer für Ziffer (Hauptgruppe → Nebengruppe → Zeichnung) ---------- */
+const N = { digits: '', focus: false };
+try { N.digits = (localStorage.getItem('ebs.nr') || '').replace(/\D/g, '').slice(0, 6); } catch {}
+const nrPrefix = () => N.digits ? gotoFmt(N.digits).replace(/\.$/, '') : '';
+const STEP = ['Hauptgruppen eingrenzen', 'Hauptgruppe auswählen', 'Nebengruppen eingrenzen', 'Nebengruppe auswählen',
+  'Zeichnungen eingrenzen', 'Zeichnung auswählen'];
+const POS = [0, 1, 3, 4, 6, 7];                          // Stelle der n-ten Ziffer in "dd.dd.dd"
+function nrChanged() {
+  const f = N.digits ? gotoFmt(N.digits) : '';
+  $('nq').value = f;
+  $('nqClear').hidden = !f;
+  try { localStorage.setItem('ebs.nr', N.digits); } catch {}
+  if (!$('gotoWin').hidden && G.mode === 'list') gotoRender();
+  run();
+}
+/* Titel ohne Gültigkeitsvermerke und Lesefehler-Reste am Anfang */
+const VERMERK = /\b(nur\s+)?(f[uü]r\s+bestehende(\s+Anlagen)?|f[uü]r\s+Neubau\s+ung[uü]ltig|nur\s+g[uü]ltig\s+f[uü]r\s+Teile\S*|Lagerbestand\s+aufbrauchen|f[uü]r\s+Beschaffung\s+und\s+Einbau\s+ung[uü]ltig)\b/gi;
+function cleanTitle(t) { return (t || '').replace(VERMERK, ' ').replace(/^[^A-Za-zÄÖÜäöü0-9]+/, '').replace(/[\s,;:/–-]+$/, '').replace(/\s+/g, ' ').trim(); }
+function goodTitle(t) { const l = (t.match(/[A-Za-zÄÖÜäöüß]/g) || []).length; return t.length >= 6 && l / t.length >= 0.75; }
+function ngName(k5) {                  // Name der Nebengruppe: erster gut lesbarer Blatttitel der Gruppe (eigene Namen hat die PDF nicht)
+  if (!S.ngNames || S.ngNames.src !== S.pages) {
+    S.ngNames = new Map(); S.ngNames.src = S.pages;
+    const all = new Map();
+    for (const s of sheets()) {
+      const k = s.nr.slice(0, 5), t = cleanTitle(s.p.ti);
+      if (!t) continue;
+      if (!all.has(k)) all.set(k, []);
+      all.get(k).push(t);
+    }
+    for (const [k, ts] of all) S.ngNames.set(k, ts.find(goodTitle) || ts[0]);
+  }
+  return S.ngNames.get(k5) || '';
+}
+function sheetTitle(nr) { const s = findSheet(nr); return cleanTitle((s && s.ti) || (S.byNr.get(nr) || []).map(p => p.ti).find(Boolean)); }
+const joinN = (arr, n = 2) => esc(arr.slice(0, n).join(' / ')) + (arr.length > n ? ` (+${arr.length - n})` : '');
+function guideVisible() { return !!N.digits || N.focus || (G.mode === 'list' && !$('gotoWin').hidden); }
+function guidePath(d) {
+  const parts = [];
+  if (d.length >= 2) { const h = d.slice(0, 2); parts.push(`${h} ${cleanTitle(S.hg[h])}`.trim()); }
+  if (d.length >= 4) { const k = `${d.slice(0, 2)}.${d.slice(2, 4)}`; parts.push(`${d.slice(2, 4)} ${ngName(k)}`.trim()); }
+  if (d.length === 6) parts.push(sheetTitle(gotoFmt(d)) || gotoFmt(d));
+  return parts.length ? `<div class="gpath">${parts.map(esc).join(' → ')}</div>` : '';
+}
+function optionText(k, ps) {
+  const uniq = f => [...new Set(ps.map(f).filter(Boolean))].sort();
+  if (k <= 1) {
+    const hgs = uniq(p => p.nr.slice(0, 2));
+    return [joinN(hgs.map(h => `${h} ${cleanTitle(S.hg[h])}`.trim())), joinN(uniq(p => p.nr.slice(0, 5)).map(ngName).filter(Boolean))];
+  }
+  if (k <= 3) {
+    const ngs = uniq(p => p.nr.slice(0, 5));
+    return [joinN(ngs.map(n => `${n.slice(3)} ${ngName(n)}`.trim())), joinN(uniq(p => p.nr).map(sheetTitle).filter(Boolean))];
+  }
+  const nrs = uniq(p => p.nr);
+  return [joinN([...new Set(nrs.map(sheetTitle).filter(Boolean))]) || joinN(nrs), joinN(nrs)];
+}
+function renderGuide() {
+  const g = $('guide');
+  if (!S.pages.length || !guideVisible()) { g.hidden = true; return; }
+  g.hidden = false;
+  const d = N.digits, k = d.length, pre = nrPrefix();
+  if (k === 6) { g.innerHTML = `<div class="ghead">Zeichnungsnummer vollständig</div>${guidePath(d)}`; return; }
+  const pool = (S.pool || S.pages.filter(passesFilter)).filter(p => p.nr && p.nr.startsWith(pre));
+  const by = new Map();
+  for (const p of pool) {
+    const c = p.nr[POS[k]];
+    if (c >= '0' && c <= '9') { if (!by.has(c)) by.set(c, []); by.get(c).push(p); }
+  }
+  g.innerHTML = `<div class="ghead">Ziffer ${k + 1} von 6 · ${STEP[k]}</div>${guidePath(d)}`;
+  for (const c of [...by.keys()].sort()) {
+    const ps = by.get(c), [main, sub] = optionText(k, ps);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'gopt';
+    b.innerHTML = `<span class="gdig">${c}</span><span class="gtxt"><span class="gmain">${main}</span>`
+      + `<span class="gsub">${ps.length} ${ps.length === 1 ? 'Seite' : 'Seiten'}${sub ? ' · ' + sub : ''}</span></span>`;
+    b.onclick = () => { N.digits += c; nrChanged(); };
+    g.append(b);
+  }
+  if (!by.size) g.insertAdjacentHTML('beforeend', `<div class="gnote">Keine Blätter mit Ebs ${esc(pre)}…`
+    + (S.inc.length || activeFilters() ? ' zu Suchtext und Filtern.' : '.') + '</div>');
 }
 function showMore() {
   el.list.querySelector('.more')?.remove();
@@ -237,31 +327,24 @@ function badges(p) {
 }
 
 /* ---------- Filter: Hauptgruppe, Bauarten ("Verwendbar für"), Gültigkeitsvermerke ---------- */
-const F = { hg: '', ng: '', offUse: new Set(), offValid: new Set(), noUse: true };
+const F = { offUse: new Set(), offValid: new Set(), noUse: true };
 try {
   const f = JSON.parse(localStorage.getItem('ebs.filter') || '{}');
-  F.hg = f.hg || ''; F.ng = f.ng || ''; F.offUse = new Set(f.offUse || []); F.offValid = new Set(f.offValid || []); F.noUse = f.noUse !== false;
+  F.offUse = new Set(f.offUse || []); F.offValid = new Set(f.offValid || []); F.noUse = f.noUse !== false;
 } catch {}
 function saveFilter() {
-  try { localStorage.setItem('ebs.filter', JSON.stringify({ hg: F.hg, ng: F.ng, offUse: [...F.offUse], offValid: [...F.offValid], noUse: F.noUse })); } catch {}
+  try { localStorage.setItem('ebs.filter', JSON.stringify({ offUse: [...F.offUse], offValid: [...F.offValid], noUse: F.noUse })); } catch {}
 }
 function passesFilter(p) {
-  if (F.hg && !p.nr.startsWith(F.hg + '.')) return false;
-  if (F.ng && !p.nr.startsWith(F.ng + '.')) return false;
   if (p.valid.some(k => F.offValid.has(k))) return false;
   if (p.use.length) { if (p.use.every(u => F.offUse.has(u))) return false; }
   else if (!F.noUse) return false;
   return true;
 }
 function activeFilters() {
-  return (F.hg ? 1 : 0) + (F.ng ? 1 : 0) + F.offUse.size + F.offValid.size + (F.noUse ? 0 : 1);
+  return F.offUse.size + F.offValid.size + (F.noUse ? 0 : 1);
 }
 function buildFilterUI() {
-  const sel = $('fHg');
-  sel.innerHTML = '<option value="">Alle Hauptgruppen</option>' + Object.keys(S.hg).sort()
-    .map(k => `<option value="${k}">${k} – ${esc(S.hg[k])}</option>`).join('');
-  sel.value = F.hg;
-  fillNg();
   const chip = (label, count, off, onToggle) => {
     const b = document.createElement('button'); b.type = 'button';
     b.className = 'chip' + (off ? ' off' : '');
@@ -288,23 +371,7 @@ function updateFilterCount() {
   $('filterSum').classList.toggle('active', !!n);
 }
 function filterChanged() { saveFilter(); updateFilterCount(); run(); }
-$('fHg').onchange = e => { F.hg = e.target.value; F.ng = ''; fillNg(); filterChanged(); };
-$('fNg').onchange = e => { F.ng = e.target.value; filterChanged(); };
-function fillNg() {                       // Nebengruppen (xx.yy) der gewählten Hauptgruppe, mit Titel des ersten Blatts
-  const sel = $('fNg');
-  if (!F.hg) { sel.innerHTML = '<option value="">– erst Hauptgruppe wählen –</option>'; sel.disabled = true; return; }
-  const groups = new Map();
-  for (const s of sheets()) if (s.nr.startsWith(F.hg + '.')) {
-    const k = s.nr.slice(0, 5);
-    if (!groups.has(k)) groups.set(k, s.p.ti || '');
-  }
-  sel.disabled = false;
-  sel.innerHTML = '<option value="">Alle Nebengruppen</option>' + [...groups.entries()]
-    .map(([k, t]) => `<option value="${k}">${k}${t ? ' – ' + esc(t.slice(0, 50)) : ''}</option>`).join('');
-  if (F.ng && !groups.has(F.ng)) F.ng = '';
-  sel.value = F.ng;
-}
-$('fReset').onclick = () => { F.hg = ''; F.ng = ''; F.offUse.clear(); F.offValid.clear(); F.noUse = true; saveFilter(); buildFilterUI(); run(); };
+$('fReset').onclick = () => { F.offUse.clear(); F.offValid.clear(); F.noUse = true; saveFilter(); buildFilterUI(); run(); };
 function snippet(t, terms) {
   const { out, map } = normMap(t);
   const ranges = [], firsts = [];
@@ -359,7 +426,8 @@ function helpEl() {
     <li><code>-wort</code> schließt Seiten mit diesem Begriff aus.</li>
     <li><code>"genaue folge"</code> sucht eine feste Wortfolge.</li>
     <li><b>Unscharf</b> (Standard): findet auch Wörter mit Lesefehlern aus der Texterkennung, z. B. „nnchgespannt“ bei <code>nachgespannt</code>. Exakte Treffer stehen oben.</li>
-    <li><b>Ebs-Nummer</b> eingeben, z. B. <code>05.71.32</code> oder nur den Anfang <code>52.1</code>: das Blatt selbst steht oben, darunter Blätter, die darauf verweisen. Kombinierbar: <code>05.71 bogen</code>.</li>
+    <li><b>Ebs-Nummernfeld</b> (zweites Feld): Ziffer für Ziffer eingeben – nach jeder Ziffer zeigt die Auswahl, welche Hauptgruppen, Nebengruppen und Zeichnungen in Frage kommen; antippen übernimmt die Ziffer. Mit Suchbegriffen kombinierbar, z. B. Nummer <code>10.01</code> + Text <code>klemme</code>.</li>
+    <li>Im Textfeld gefundene Ebs-Nummern wie <code>05.71.32</code> finden auch Blätter, die darauf verweisen.</li>
     <li><b>Inhalt</b>: Blätter nach Hauptgruppe → Gruppe → Blatt durchblättern.</li>
     <li><b>Filter</b>: Bauarten („Verwendbar für“, z. B. Re 200, S-Bahn) und Gültigkeitsvermerke („Für Neubau ungültig“ …) ein- oder ausblenden.</li>
     <li>In der Zeichnung: <b>Fundstelle</b> zoomt nacheinander auf jede Markierung. <b>Ebs-Nr.</b> öffnet ein verschiebbares Fenster mit Ziffernblock: Nummer eintippen (Punkte kommen automatisch), das Blatt öffnet sich (immer Blatt 1), „← zurück zu …“ führt zurück. Zoomen mit Mausrad, Doppelklick oder zwei Fingern.</li>
@@ -406,7 +474,7 @@ function showThumb(img) {
 /* ---------- Zeichnungsansicht ---------- */
 let pageSeq = 0, bgTask = null, hiTask = null, hiTimer = 0;
 
-function openViewer(i) { S.hitPos = i; S.nav = []; showPage(S.results[i].p.n); }
+function openViewer(i) { if (G.mode === 'list') closeGoto(); S.hitPos = i; S.nav = []; showPage(S.results[i].p.n); }
 
 /* ---------- Verweise: Ebs-Nummer eingeben, Blatt öffnen, mit Zurück ---------- */
 S.nav = [];
@@ -437,17 +505,21 @@ function followRef(nr) {
 }
 
 /* Fenster „Gehe zu Ebs-Nr.“: verschiebbar, eigener Ziffernblock, Punkte nach je 2 Ziffern */
-const G = { digits: '' };
+/* Ziffernblock-Fenster, zwei Betriebsarten:
+   'list' – füllt das Nummernfeld der Suche (Ziffernauswahl darunter), 'view' – öffnet in der Zeichnung ein Blatt */
+const G = { digits: '', mode: 'view' };
 const touchDevice = matchMedia('(pointer: coarse)').matches;
 function gotoFmt(d) {
   return d.replace(/^(\d{2})(\d{0,2})(\d{0,2}).*$/, (m, a, b, c) => a + '.' + (b ? b + (b.length === 2 ? '.' + c : '') : ''))
     .replace(/^(\d)$/, '$1');
 }
-function openGoto() {
+function openGoto(mode = 'view') {
   if (!S.pages.length) return;
-  G.digits = '';
+  G.mode = mode; G.digits = '';
+  $('gotoTitle').textContent = mode === 'list' ? 'Nummer' : 'Gehe zu Ebs-Nr.';
   const w = $('gotoWin');
   w.hidden = false;
+  if (mode === 'list') renderGuide();
   try {
     const pos = JSON.parse(localStorage.getItem('ebs.gotoPos') || 'null');
     if (pos) { w.style.left = pos.x + 'px'; w.style.top = pos.y + 'px'; w.style.right = 'auto'; w.style.bottom = 'auto'; }
@@ -456,41 +528,43 @@ function openGoto() {
   gotoRender();
   if (!touchDevice) $('gotoInput').focus();
 }
-function closeGoto() { $('gotoWin').hidden = true; }
+function closeGoto() {
+  const w = $('gotoWin');
+  if (w.hidden) return;
+  w.hidden = true;
+  if (G.mode === 'list') renderGuide();
+}
 function gotoRender() {
-  const d = G.digits;
+  const list = G.mode === 'list', d = list ? N.digits : G.digits;
   $('gotoInput').value = d ? gotoFmt(d) : '';
-  const box = $('gotoHits'); box.textContent = ''; $('gotoMsg').textContent = '';
-  if (d.length < 2) { $('gotoMsg').textContent = 'Ziffern eingeben – die Punkte kommen automatisch.'; keepInView($('gotoWin')); return; }
-  const prefix = gotoFmt(d).replace(/\.$/, '');
-  const hits = sheets().filter(s => s.nr.startsWith(prefix));
-  if (!hits.length) { $('gotoMsg').textContent = `Keine Ebs ${prefix}… in dieser PDF.`; return; }
-  for (const s of hits.slice(0, 6)) {
-    const b = document.createElement('button'); b.type = 'button'; b.className = 'gotohit';
-    b.innerHTML = `<b>Ebs ${s.nr}</b> <span>${esc(s.p.ti || '')}</span>`;
-    b.onclick = () => gotoOpen(s.nr);
-    box.append(b);
-  }
-  if (hits.length > 6) $('gotoMsg').textContent = `… und ${hits.length - 6} weitere – weitere Ziffern eingeben.`;
+  $('gotoInput').placeholder = list ? 'Ebs-Nr.' : '__.__.__';
+  let m = '';
+  if (!list && !d) m = 'Ziffern eingeben – die Punkte kommen automatisch.';
+  else if (!list && d.length === 6 && !S.byNr.has(gotoFmt(d))) m = `Ebs ${gotoFmt(d)} ist in dieser PDF nicht enthalten.`;
+  $('gotoMsg').textContent = m;
+  $('gotoMsg').hidden = !m;
   keepInView($('gotoWin'));
 }
 function gotoOpen(nr) {
-  if (!followRef(nr)) { $('gotoMsg').textContent = `Ebs ${nr} ist in dieser PDF nicht enthalten.`; return; }
+  if (!followRef(nr)) { $('gotoMsg').textContent = `Ebs ${nr} ist in dieser PDF nicht enthalten.`; $('gotoMsg').hidden = false; return; }
   closeGoto();
 }
 function gotoKey(k) {
-  if (/^\d$/.test(k)) { if (G.digits.length < 6) G.digits += k; }
-  else if (k === 'back') G.digits = G.digits.slice(0, -1);
-  else if (k === 'clear') G.digits = '';
+  const list = G.mode === 'list';
+  let d = list ? N.digits : G.digits;
+  if (/^\d$/.test(k)) { if (d.length < 6) d += k; }
+  else if (k === 'back') d = d.slice(0, -1);
+  else if (k === 'clear') d = '';
   else if (k === 'ok') {
-    if (G.digits.length === 6) return gotoOpen(gotoFmt(G.digits));
-    const first = $('gotoHits').querySelector('.gotohit');
-    if (first && $('gotoHits').children.length === 1) return first.click();
-    $('gotoMsg').textContent = 'Bitte alle 6 Ziffern eingeben oder ein Blatt antippen.';
+    if (list) return closeGoto();
+    if (d.length === 6) return gotoOpen(gotoFmt(d));
+    $('gotoMsg').textContent = 'Bitte alle 6 Ziffern eingeben.'; $('gotoMsg').hidden = false;
     return;
   }
+  if (list) { if (d !== N.digits) { N.digits = d; nrChanged(); } else gotoRender(); return; }
+  G.digits = d;
   gotoRender();
-  if (G.digits.length === 6 && S.byNr.has(gotoFmt(G.digits))) gotoOpen(gotoFmt(G.digits));
+  if (d.length === 6 && S.byNr.has(gotoFmt(d))) gotoOpen(gotoFmt(d));
 }
 function keepInView(w) {
   const r = w.getBoundingClientRect(), m = 6;
@@ -531,12 +605,35 @@ function keepInView(w) {
     else if (e.key === 'Tab') return;
     e.preventDefault();
   });
+  const pasted = e => { e.preventDefault(); return (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6); };
   inp.addEventListener('paste', e => {      // eingefügte Nummer übernehmen, z. B. "05.71.32"
-    e.preventDefault();
-    G.digits = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
-    gotoRender();
+    const d = pasted(e);
+    if (G.mode === 'list') { N.digits = d; nrChanged(); } else { G.digits = d; gotoRender(); }
   });
   addEventListener('resize', () => { if (!w.hidden) keepInView(w); });
+
+  // Nummernfeld der Suche: Handy/Tablet → Ziffernblock-Fenster, PC → Tastatur
+  const nq = $('nq');
+  if (touchDevice) {
+    nq.readOnly = true; nq.inputMode = 'none';
+    nq.addEventListener('click', () => openGoto('list'));
+  }
+  nq.addEventListener('focus', () => { N.focus = true; renderGuide(); });
+  nq.addEventListener('blur', () => { N.focus = false; setTimeout(renderGuide, 250); });
+  nq.addEventListener('keydown', e => {
+    if (touchDevice) { e.preventDefault(); return; }
+    e.stopPropagation();
+    let d = N.digits;
+    if (/^\d$/.test(e.key)) { if (d.length < 6) d += e.key; }
+    else if (e.key === 'Backspace') d = d.slice(0, -1);
+    else if (e.key === 'Delete' || e.key === 'Escape') d = '';
+    else if (e.key === 'Enter') { nq.blur(); e.preventDefault(); return; }
+    else if (e.key === 'Tab' || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    if (d !== N.digits) { N.digits = d; nrChanged(); }
+  });
+  nq.addEventListener('paste', e => { N.digits = pasted(e); nrChanged(); });
+  $('nqClear').onclick = () => { N.digits = ''; nrChanged(); if (!touchDevice) nq.focus(); };
 })();
 function navBack() {
   const s = S.nav.pop();
@@ -1046,29 +1143,42 @@ async function importPicked(files) {
   const arr = [...files];
   const pdf = arr.find(f => /\.pdf$/i.test(f.name));
   const dat = arr.find(f => /\.bin$/i.test(f.name));
-  if (!pdf || !dat) { await refreshState('Bitte beide Dateien zusammen auswählen: die PDF und „ebs-daten.bin“.'); return; }
+  // Nur eine der beiden Dateien gewählt: geht, wenn die andere schon vollständig auf dem Gerät liegt
+  // (z. B. neue Suchdaten nach Korrekturen – die 650 MB große PDF bleibt dann einfach liegen)
+  const st = await Store.status().catch(() => null);
+  const old = st && st.meta;
+  const havePdf = !!(old && st.pdf && st.pdf.size === old.pdfSize);
+  const haveDat = !!(old && st.data && st.data.size === old.datenSize);
+  if (!pdf && !dat) { await refreshState('Bitte die PDF und/oder „ebs-daten.bin“ auswählen.'); return; }
+  if (!pdf && !havePdf) { await refreshState('Auf diesem Gerät fehlt noch die PDF – bitte die PDF und „ebs-daten.bin“ zusammen auswählen.'); return; }
+  if (!dat && !haveDat) { await refreshState('Auf diesem Gerät fehlen noch die Suchdaten – bitte die PDF und „ebs-daten.bin“ zusammen auswählen.'); return; }
   setBusy(true);
   try {
     navigator.storage.persist?.().catch(() => {});
-    if (dat.size < 1e6) throw new Error(`„${dat.name}“ ist nur ${dat.size.toLocaleString('de-DE')} Bytes groß – vermutlich noch nicht aus OneDrive heruntergeladen. In der OneDrive-App „Offline verfügbar machen“ und erneut wählen.`);
-    await Store.checkProtected(dat, 'Die gewählten Dateien');
-    await Store.checkProtected(pdf, 'Die gewählten Dateien');
+    if (dat && dat.size < 1e6) throw new Error(`„${dat.name}“ ist nur ${dat.size.toLocaleString('de-DE')} Bytes groß – vermutlich noch nicht aus OneDrive heruntergeladen. In der OneDrive-App „Offline verfügbar machen“ und erneut wählen.`);
+    for (const f of [dat, pdf]) if (f) await Store.checkProtected(f, 'Die gewählten Dateien');
     releaseData();
-    await Store.writeMeta({ pdfSize: pdf.size, datenSize: dat.size, source: 'datei' });
+    const pdfSize = pdf ? pdf.size : old.pdfSize;
+    await Store.writeMeta({ ...(pdf ? {} : { pdfPw: old.pdfPw || '' }), pdfSize, datenSize: dat ? dat.size : old.datenSize, source: 'datei' });
     // erst vollständig in den App-Speicher kopieren, dann prüfen (direktes Lesen aus dem Auswahldialog ist unter iOS unzuverlässig)
-    await Store.importFile(dat, Store.DATA, (p, t) => progress('Suchdaten', p, t));
+    if (dat) await Store.importFile(dat, Store.DATA, (p, t) => progress('Suchdaten', p, t));
     let head;
     try { head = (await Store.openBundle()).head; }
-    catch (e) { throw new Error(`${e.message} · ${await Store.describe(dat, 'Gewählt „' + dat.name + '“')}`); }
-    await Store.importFile(pdf, Store.PDF, (p, t) => progress('Zeichnungen (PDF)', p, t));
+    catch (e) { throw new Error(dat ? `${e.message} · ${await Store.describe(dat, 'Gewählt „' + dat.name + '“')}` : e.message); }
+    if (pdf) await Store.importFile(pdf, Store.PDF, (p, t) => progress('Zeichnungen (PDF)', p, t));
     // Die offizielle Fassung (z. B. EbsPDF_03_2026.pdf) ist anders groß und ggf. passwortgeschützt –
     // geprüft wird deshalb, ob sie sich öffnen lässt und gleich viele Seiten hat wie die Suchdaten.
+    $('prog').hidden = false;
     $('progText').textContent = 'Prüfe PDF …';
     let pw;
-    try { pw = await verifyPdf(await Store.file(Store.PDF), head); }
-    catch (e) { await Store.removeFile(Store.PDF); throw e; }
+    try { pw = await verifyPdf(await Store.file(Store.PDF), head, pdf ? '' : (old.pdfPw || '')); }
+    catch (e) {
+      if (pdf) await Store.removeFile(Store.PDF);
+      else e.message += ' – Suchdaten und PDF passen nicht zusammen, bitte beide Dateien zusammen auswählen.';
+      throw e;
+    }
     const m = await Store.readMeta();
-    await Store.writeMeta({ ...m, pdfPw: pw, official: !!(head.fileSize && head.fileSize !== pdf.size) });
+    await Store.writeMeta({ ...m, pdfPw: pw, official: !!(head.fileSize && head.fileSize !== pdfSize) });
     await finishSetup();
   } catch (e) {
     await refreshState('Fehler: ' + (e.message || e));
@@ -1077,8 +1187,7 @@ async function importPicked(files) {
   }
 }
 /* PDF zur Probe öffnen; bei Passwortschutz nachfragen. Gibt das Passwort zurück ('' ohne Schutz). */
-async function verifyPdf(file, head) {
-  let pw = '';
+async function verifyPdf(file, head, pw = '') {
   for (let attempt = 0; ; attempt++) {
     const task = pdfjsLib.getDocument({ range: new BlobRangeTransport(file), password: pw || undefined,
       disableAutoFetch: true, disableStream: true, rangeChunkSize: 1 << 19 });
@@ -1093,7 +1202,7 @@ async function verifyPdf(file, head) {
     } catch (e) {
       task.destroy?.();
       if (e && e.name === 'PasswordException') {
-        pw = await askPassword(attempt === 0 ? 'Diese PDF ist mit einem Passwort geschützt.' : 'Das Passwort stimmt nicht – bitte erneut eingeben.');
+        pw = await askPassword(attempt === 0 && !pw ?'Diese PDF ist mit einem Passwort geschützt.' : 'Das Passwort stimmt nicht – bitte erneut eingeben.');
         if (pw === null) throw new Error('Ohne Passwort lässt sich die PDF nicht öffnen.');
         continue;
       }
@@ -1158,6 +1267,7 @@ el.sort.addEventListener('change', run);
 $('fuzzy').addEventListener('change', () => { try { localStorage.setItem('ebs.fuzzy', $('fuzzy').checked ? '1' : '0'); } catch {} run(); });
 try { el.q.value = localStorage.getItem('ebs.q') || ''; if (localStorage.getItem('ebs.fuzzy') === '0') $('fuzzy').checked = false; } catch {}
 syncClear();
+$('nq').value = N.digits ? gotoFmt(N.digits) : ''; $('nqClear').hidden = !N.digits;
 boot();
 
 if ('serviceWorker' in navigator && window.isSecureContext) {

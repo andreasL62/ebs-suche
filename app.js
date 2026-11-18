@@ -538,15 +538,11 @@ function gotoRender() {
   const list = G.mode === 'list', d = list ? N.digits : G.digits;
   $('gotoInput').value = d ? gotoFmt(d) : '';
   $('gotoInput').placeholder = list ? 'Ebs-Nr.' : '__.__.__';
-  let m = '';
-  if (!list && !d) m = 'Ziffern eingeben – die Punkte kommen automatisch.';
-  else if (!list && d.length === 6 && !S.byNr.has(gotoFmt(d))) m = `Ebs ${gotoFmt(d)} ist in dieser PDF nicht enthalten.`;
-  $('gotoMsg').textContent = m;
-  $('gotoMsg').hidden = !m;
-  keepInView($('gotoWin'));
+  // kein Hinweistext im Fenster: es soll beim Tippen seine Größe nicht ändern (sonst verrutschen die Tasten)
+  if (!list && d.length === 6 && !S.byNr.has(gotoFmt(d))) flash(`Ebs ${gotoFmt(d)} ist in dieser PDF nicht enthalten.`);
 }
 function gotoOpen(nr) {
-  if (!followRef(nr)) { $('gotoMsg').textContent = `Ebs ${nr} ist in dieser PDF nicht enthalten.`; $('gotoMsg').hidden = false; return; }
+  if (!followRef(nr)) { flash(`Ebs ${nr} ist in dieser PDF nicht enthalten.`); return; }
   closeGoto();
 }
 function gotoKey(k) {
@@ -558,7 +554,7 @@ function gotoKey(k) {
   else if (k === 'ok') {
     if (list) return closeGoto();
     if (d.length === 6) return gotoOpen(gotoFmt(d));
-    $('gotoMsg').textContent = 'Bitte alle 6 Ziffern eingeben.'; $('gotoMsg').hidden = false;
+    flash('Bitte alle 6 Ziffern eingeben.');
     return;
   }
   if (list) { if (d !== N.digits) { N.digits = d; nrChanged(); } else gotoRender(); return; }

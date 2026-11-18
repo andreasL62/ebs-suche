@@ -194,11 +194,11 @@ mark { background: var(--mark); color: var(--mark-ink); border-radius: 3px; padd
 #gotoHead { display: flex; align-items: center; gap: 6px; padding: 8px 0 6px; font-weight: 600; font-size: 14px; cursor: move; user-select: none; }
 #gotoHead .grip { color: var(--muted); }
 #gotoClose { margin-left: auto; border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 2px 4px; }
-#gotoInput { width: 100%; font: 600 20px/1 ui-monospace, Consolas, monospace; letter-spacing: 1px; text-align: center;
+#gotoInput { margin-bottom: 8px; width: 100%; font: 600 20px/1 ui-monospace, Consolas, monospace; letter-spacing: 1px; text-align: center;
   padding: 8px; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg); color: var(--text); }
 #gotoMsg { color: var(--muted); font-size: 12px; min-height: 16px; margin: 4px 0; }
 #gotoWin .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-#gotoWin .pad button { height: 36px; font-size: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); cursor: pointer; }
+#gotoWin .pad button { touch-action: manipulation; height: 36px; font-size: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); cursor: pointer; }
 #gotoWin .pad button:active { background: var(--line); }
 #gotoWin .pad .ok { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-size: 16px; font-weight: 700; }
 

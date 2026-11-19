@@ -1,6 +1,6 @@
 // Offline-Start der App: App-Dateien kommen aus dem Gerätespeicher, Updates werden im Hintergrund geholt.
 // PDF und Suchdaten liegen nicht hier, sondern im Dateispeicher der App (siehe store.js).
-const CACHE = 'ebs-suche-v10';
+const CACHE = 'ebs-suche-v11';
 const SHELL = ['./', 'index.html', 'app.js', 'store.js', 'opfs-worker.js', 'style.css', 'manifest.webmanifest',
   'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png', 'lib/pdf.min.js', 'lib/pdf.worker.min.js'];
 const NO_CACHE = ['/doc.pdf', '/ebs-daten.bin', '/info', '/ca.cer'];
@@ -10,7 +10,7 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys()
-    .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+    .then(keys => Promise.all(keys.filter(k => k.startsWith('ebs-suche-') && k !== CACHE).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
